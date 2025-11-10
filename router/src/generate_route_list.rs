@@ -8,10 +8,7 @@ use crate::{
 use futures::future::join_all;
 use reactive_graph::owner::Owner;
 use std::{
-    cell::{Cell, RefCell},
-    collections::HashSet,
-    future::Future,
-    mem,
+    borrow::Cow, cell::{Cell, RefCell}, collections::HashSet, future::Future, mem
 };
 use tachys::view::RenderHtml;
 
@@ -84,6 +81,7 @@ impl RouteListing {
     /// Generates static files for this route listing.
     pub async fn generate_static_files<Fut, WriterFut>(
         mut self,
+        site_base: Option<Cow<'static, str>>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
@@ -102,9 +100,11 @@ impl RouteListing {
             let paths = self.into_static_paths().await.unwrap_or_default();
 
             for path in paths {
+                println!("generate static file at {path}");
                 // Err(_) here would just mean they've dropped the rx and are no longer awaiting
                 // it; we're only using it to notify them it's done so it doesn't matter in that
                 // case
+                let path = ResolvedStaticPath::new(format!("{}{path}", site_base.clone().unwrap_or_default()));
                 _ = all_initial_tx.send(path.build(
                     render_fn.clone(),
                     writer.clone(),
@@ -200,6 +200,7 @@ impl RouteList {
     /// Generates static files for the inner list of route listings.
     pub async fn generate_static_files<Fut, WriterFut>(
         self,
+        site_base: Option<Cow<'static, str>>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
@@ -212,6 +213,7 @@ impl RouteList {
     {
         join_all(self.into_inner().into_iter().map(|route| {
             route.generate_static_files(
+                site_base.clone(),
                 render_fn.clone(),
                 writer.clone(),
                 was_404.clone(),

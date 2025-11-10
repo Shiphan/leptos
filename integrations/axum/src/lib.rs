@@ -35,7 +35,7 @@
 //! directory in the Leptos repository.
 
 #[cfg(feature = "default")]
-use axum::http::Uri;
+use axum::http::{uri::PathAndQuery, Uri};
 use axum::{
     body::{Body, Bytes},
     extract::{FromRef, FromRequestParts, MatchedPath, State},
@@ -75,7 +75,7 @@ use server_fn::{error::ServerFnErrorErr, redirect::REDIRECT_HEADER};
 use std::path::Path;
 #[cfg(feature = "default")]
 use std::sync::LazyLock;
-use std::{collections::HashSet, fmt::Debug, io, pin::Pin, sync::Arc};
+use std::{borrow::Cow, collections::HashSet, fmt::Debug, io, pin::Pin, sync::Arc};
 #[cfg(feature = "default")]
 use tower::util::ServiceExt;
 #[cfg(feature = "default")]
@@ -1169,12 +1169,13 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list<IV>(
+    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
 ) -> Vec<AxumRouteListing>
 where
     IV: IntoView + 'static,
 {
-    generate_route_list_with_exclusions_and_ssg(app_fn, None).0
+    generate_route_list_with_exclusions_and_ssg(site_base, app_fn, None).0
 }
 
 /// Generates a list of all routes defined in Leptos's Router in your app. We can then use this to automatically
@@ -1185,12 +1186,13 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_ssg<IV>(
+    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
 ) -> (Vec<AxumRouteListing>, StaticRouteGenerator)
 where
     IV: IntoView + 'static,
 {
-    generate_route_list_with_exclusions_and_ssg(app_fn, None)
+    generate_route_list_with_exclusions_and_ssg(site_base, app_fn, None)
 }
 
 /// Generates a list of all routes defined in Leptos's Router in your app. We can then use this to automatically
@@ -1202,13 +1204,14 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_exclusions<IV>(
+    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
     excluded_routes: Option<Vec<String>>,
 ) -> Vec<AxumRouteListing>
 where
     IV: IntoView + 'static,
 {
-    generate_route_list_with_exclusions_and_ssg(app_fn, excluded_routes).0
+    generate_route_list_with_exclusions_and_ssg(site_base, app_fn, excluded_routes).0
 }
 
 /// Generates a list of all routes defined in Leptos's Router in your app. We can then use this to automatically
@@ -1220,6 +1223,7 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_exclusions_and_ssg<IV>(
+    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
     excluded_routes: Option<Vec<String>>,
 ) -> (Vec<AxumRouteListing>, StaticRouteGenerator)
@@ -1227,6 +1231,7 @@ where
     IV: IntoView + 'static,
 {
     generate_route_list_with_exclusions_and_ssg_and_context(
+        site_base,
         app_fn,
         excluded_routes,
         || {},
@@ -1319,6 +1324,7 @@ impl AxumRouteListing {
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_exclusions_and_ssg_and_context<IV>(
+    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + Clone + Send + 'static,
     excluded_routes: Option<Vec<String>>,
     additional_context: impl Fn() + Clone + Send + 'static,
@@ -1344,6 +1350,7 @@ where
 
     let generator = StaticRouteGenerator::new(
         &routes,
+        site_base,
         app_fn.clone(),
         additional_context.clone(),
     );
@@ -1450,6 +1457,7 @@ impl StaticRouteGenerator {
     /// Creates a new static route generator from the given list of route definitions.
     pub fn new<IV>(
         routes: &RouteList,
+        site_base: Arc<str>,
         app_fn: impl Fn() -> IV + Clone + Send + 'static,
         additional_context: impl Fn() + Clone + Send + 'static,
     ) -> Self
@@ -1468,6 +1476,7 @@ impl StaticRouteGenerator {
                     owner.with(|| {
                         additional_context();
                         Box::pin(ScopedFuture::new(routes.generate_static_files(
+                        Some(Cow::from(site_base.to_string())),
                         move |path: &ResolvedStaticPath| {
                             Self::render_route(
                                 path.to_string(),
@@ -1795,6 +1804,7 @@ where
         // S represents the router's finished state allowing us to provide
         // it to the user's server functions.
         let state = state.clone();
+        let site_base = LeptosOptions::from_ref(&state).site_base;
         let cx_with_state = move || {
             provide_context::<S>(state.clone());
             additional_context();
@@ -1810,6 +1820,7 @@ where
 
         // register server functions
         for (path, method) in server_fn::axum::server_fn_paths() {
+            println!("path: {path}, method: {method:?}");
             let cx_with_state = cx_with_state.clone();
             let handler = move |req: Request<Body>| async move {
                 handle_server_fns_with_context(cx_with_state, req).await
@@ -1817,7 +1828,7 @@ where
 
             if !excluded.contains(path) {
                 router = router.route(
-                    path,
+                    path, // TODO: should this also been changed?
                     match method {
                         Method::GET => get(handler),
                         Method::POST => post(handler),
@@ -1839,6 +1850,8 @@ where
         for listing in paths.iter().filter(|p| !p.exclude) {
             let path = listing.path();
 
+            println!("path: {path}");
+
             for method in listing.methods() {
                 let cx_with_state = cx_with_state.clone();
                 let cx_with_state_and_method = move || {
@@ -1848,8 +1861,9 @@ where
                 router = if matches!(listing.mode(), SsrMode::Static(_)) {
                     #[cfg(feature = "default")]
                     {
+                        println!("add a route to {site_base}{path}");
                         router.route(
-                            path,
+                            &format!("{site_base}{path}"),
                             get(handle_static_route(
                                 cx_with_state_and_method.clone(),
                                 app_fn.clone(),
@@ -1866,7 +1880,7 @@ where
                     }
                 } else {
                     router.route(
-                        path,
+                        path, // TODO: should this also been changed?
                         match listing.mode() {
                             SsrMode::OutOfOrder => {
                                 let s = render_app_to_stream_with_context(
@@ -2045,45 +2059,75 @@ where
             let shell = shell.clone();
             async move {
                 let options = LeptosOptions::from_ref(&state);
-                let res =
-                    get_static_file(uri, &options.site_root, req.headers());
-                let res = res.await.unwrap();
+                let res = 'res: {
+                    let mut uri_parts = uri.into_parts();
+                    let Some(path_and_query) = uri_parts.path_and_query else {
+                        break 'res None;
+                    };
+                    let Some(path_and_query) = path_and_query
+                        .as_str()
+                        .strip_prefix(options.site_base.as_ref())
+                    else {
+                        break 'res None;
+                    };
+                    let Ok(path_and_query) =
+                        PathAndQuery::try_from(path_and_query)
+                    else {
+                        break 'res None;
+                    };
+                    uri_parts.path_and_query = Some(path_and_query);
+                    let Ok(uri) = Uri::from_parts(uri_parts) else {
+                        break 'res None;
+                    };
+                    let res =
+                        get_static_file(uri, &options.site_root, req.headers());
+                    Some(res.await.unwrap())
+                };
 
-                if res.status() == StatusCode::OK {
-                    res.into_response()
-                } else {
-                    let mut res = handle_response_inner(
-                        move || {
-                            provide_context(state.clone());
-                            additional_context();
-                        },
-                        move || shell(options),
-                        req,
-                        |app, chunks, _supports_ooo| {
-                            Box::pin(async move {
-                                let app = if cfg!(feature = "islands-router") {
-                                    app.to_html_stream_in_order_branching()
-                                } else {
-                                    app.to_html_stream_in_order()
-                                };
-                                let app = app.collect::<String>().await;
-                                let chunks = chunks();
-                                Box::pin(once(async move { app }).chain(chunks))
-                                    as PinnedStream<String>
-                            })
-                        },
-                    )
-                    .await;
-
-                    // set the status to 404
-                    // but if the status was already set (for example, to a 302 redirect) don't
-                    // overwrite it
-                    let status = res.status_mut();
-                    if *status == StatusCode::OK {
-                        *res.status_mut() = StatusCode::NOT_FOUND;
+                match res {
+                    Some(res) if res.status() == StatusCode::OK => {
+                        println!("got a static file");
+                        res.into_response()
                     }
+                    _ => {
+                        println!("didn't got a static file");
+                        let mut res = handle_response_inner(
+                            move || {
+                                provide_context(state.clone());
+                                additional_context();
+                            },
+                            move || shell(options),
+                            req,
+                            |app, chunks, _supports_ooo| {
+                                Box::pin(async move {
+                                    let app = if cfg!(
+                                        feature = "islands-router"
+                                    ) {
+                                        app.to_html_stream_in_order_branching()
+                                    } else {
+                                        app.to_html_stream_in_order()
+                                    };
+                                    let app = app.collect::<String>().await;
+                                    let chunks = chunks();
+                                    Box::pin(
+                                        once(async move { app }).chain(chunks),
+                                    )
+                                        as PinnedStream<String>
+                                })
+                            },
+                        )
+                        .await;
 
-                    res
+                        // set the status to 404
+                        // but if the status was already set (for example, to a 302 redirect) don't
+                        // overwrite it
+                        let status = res.status_mut();
+                        if *status == StatusCode::OK {
+                            *res.status_mut() = StatusCode::NOT_FOUND;
+                        }
+
+                        res
+                    }
                 }
             }
         })

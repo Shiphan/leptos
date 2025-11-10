@@ -71,6 +71,7 @@ pub fn Router<Chil>(
 where
     Chil: IntoView,
 {
+    let site_base = option_env!("LEPTOS_SITE_BASE");
     #[cfg(feature = "ssr")]
     let (location_provider, current_url, redirect_hook) = {
         let req = use_context::<RequestUrl>().expect("no RequestUrl provided");
@@ -85,7 +86,16 @@ where
         let owner = Owner::current();
         let location =
             BrowserUrl::new().expect("could not access browser navigation"); // TODO options here
-        location.init(base.clone());
+        let base = site_base
+            .map(|site_base| {
+                Cow::from(format!(
+                    "{}{}",
+                    site_base,
+                    base.clone().unwrap_or_default()
+                ))
+            })
+            .or(base.clone());
+        location.init(base);
         provide_context(location.clone());
         let current_url = location.as_url().clone();
 
@@ -105,6 +115,7 @@ where
     _ = server_fn::redirect::set_redirect_hook(redirect_hook);
 
     provide_context(RouterContext {
+        site_base: site_base.map(Into::into),
         base,
         current_url,
         location,
@@ -120,6 +131,7 @@ where
 
 #[derive(Clone)]
 pub(crate) struct RouterContext {
+    pub site_base: Option<Cow<'static, str>>,
     pub base: Option<Cow<'static, str>>,
     pub current_url: ArcRwSignal<Url>,
     pub location: Location,
@@ -234,6 +246,7 @@ where
     let location = use_context::<BrowserUrl>();
     let RouterContext {
         current_url,
+        site_base,
         base,
         set_is_routing,
         ..
@@ -245,6 +258,7 @@ where
         base
     });
     let routes = RouteDefs::new_with_base(
+        site_base,
         children.into_inner(),
         base.clone().unwrap_or_default(),
     );
@@ -287,6 +301,7 @@ where
     let location = use_context::<BrowserUrl>();
     let RouterContext {
         current_url,
+        site_base,
         base,
         set_is_routing,
         ..
@@ -301,6 +316,7 @@ where
         base
     });
     let routes = RouteDefs::new_with_base(
+        site_base,
         children.into_inner(),
         base.clone().unwrap_or_default(),
     );

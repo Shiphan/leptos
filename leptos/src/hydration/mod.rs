@@ -56,15 +56,15 @@ pub fn HydrationScripts(
     #[prop(optional)]
     islands_router: bool,
     /// A base url, not including a trailing slash
+    /// TODO: if None, falls back to options.site_base
     #[prop(optional, into)]
     root: Option<String>,
 ) -> impl IntoView {
     static SPLIT_MANIFEST: OnceLock<Option<WasmSplitManifest>> =
         OnceLock::new();
 
+    let root = root.unwrap_or(options.site_base.to_string());
     if let Some(splits) = SPLIT_MANIFEST.get_or_init(|| {
-        let root = root.clone().unwrap_or_default();
-
         let (wasm_split_js, wasm_split_manifest) = if options.hash_files {
             let hash_path = std::env::current_exe()
                 .map(|path| {
@@ -174,7 +174,6 @@ pub fn HydrationScripts(
         .then_some(include_str!("./islands_routing.js"))
         .unwrap_or_default();
 
-    let root = root.unwrap_or_default();
     view! {
         <link rel="modulepreload" href=format!("{root}/{pkg_path}/{js_file_name}.js") crossorigin=nonce.clone()/>
         <link
