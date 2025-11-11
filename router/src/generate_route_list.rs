@@ -8,7 +8,7 @@ use crate::{
 use futures::future::join_all;
 use reactive_graph::owner::Owner;
 use std::{
-    borrow::Cow, cell::{Cell, RefCell}, collections::HashSet, future::Future, mem
+    cell::{Cell, RefCell}, collections::HashSet, future::Future, mem, sync::Arc
 };
 use tachys::view::RenderHtml;
 
@@ -81,7 +81,7 @@ impl RouteListing {
     /// Generates static files for this route listing.
     pub async fn generate_static_files<Fut, WriterFut>(
         mut self,
-        site_base: Option<Cow<'static, str>>,
+        site_base: Arc<str>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
@@ -104,8 +104,8 @@ impl RouteListing {
                 // Err(_) here would just mean they've dropped the rx and are no longer awaiting
                 // it; we're only using it to notify them it's done so it doesn't matter in that
                 // case
-                let path = ResolvedStaticPath::new(format!("{}{path}", site_base.clone().unwrap_or_default()));
                 _ = all_initial_tx.send(path.build(
+                    site_base.clone(),
                     render_fn.clone(),
                     writer.clone(),
                     was_404.clone(),
@@ -200,7 +200,7 @@ impl RouteList {
     /// Generates static files for the inner list of route listings.
     pub async fn generate_static_files<Fut, WriterFut>(
         self,
-        site_base: Option<Cow<'static, str>>,
+        site_base: Arc<str>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
