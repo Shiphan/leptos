@@ -1488,7 +1488,7 @@ impl StaticRouteGenerator {
                     owner.with(|| {
                         additional_context();
                         Box::pin(ScopedFuture::new(routes.generate_static_files(
-                        Some(Cow::from(site_base.to_string())),
+                        site_base,
                         move |path: &ResolvedStaticPath| {
                             Self::render_route(
                                 path.to_string(),
@@ -1559,17 +1559,16 @@ fn was_404(owner: &Owner) -> bool {
 }
 
 #[cfg(feature = "default")]
-fn static_path(options: &LeptosOptions, path: &str) -> Option<String> {
+fn static_path(options: &LeptosOptions, path: &str) -> String {
     use leptos_integration_utils::static_file_path;
 
-    let path = path.strip_prefix(options.site_base.as_ref())?;
     // If the path ends with a trailing slash, we generate the path
     // as a directory with a index.html file inside.
-    Some(if path != "/" && path.ends_with("/") {
+    if path != "/" && path.ends_with("/") {
         static_file_path(options, &format!("{path}index"))
     } else {
         static_file_path(options, path)
-    })
+    }
 }
 
 #[cfg(feature = "default")]
@@ -1583,7 +1582,7 @@ async fn write_static_route(
         STATIC_HEADERS.insert(path.to_string(), options);
     }
 
-    let path = static_path(options, path).ok_or(std::io::Error::other(format!("failed to get static path of {path}")))?;
+    let path = static_path(options, path);
     let path = Path::new(&path);
     if let Some(path) = path.parent() {
         tokio::fs::create_dir_all(path).await?;
@@ -1619,7 +1618,7 @@ where
         Box::pin(async move {
             let options = LeptosOptions::from_ref(&state);
             let orig_path = req.uri().path();
-            let path = static_path(&options, orig_path).expect(&format!("failed to get static path of {orig_path}"));
+            let path = static_path(&options, orig_path);
             let path = Path::new(&path);
             let exists = tokio::fs::try_exists(path).await.unwrap_or(false);
 
@@ -1628,7 +1627,9 @@ where
 
                 let (owner, html) = path
                     .build(
+                        options.site_base.clone(),
                         move |path: &ResolvedStaticPath| {
+                            println!("trying to render {path}...");
                             StaticRouteGenerator::render_route(
                                 path.to_string(),
                                 app_fn.clone(),
