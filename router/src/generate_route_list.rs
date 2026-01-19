@@ -7,9 +7,7 @@ use crate::{
 };
 use futures::future::join_all;
 use reactive_graph::owner::Owner;
-use std::{
-    cell::{Cell, RefCell}, collections::HashSet, future::Future, mem, sync::Arc
-};
+use std::{cell::{Cell, RefCell}, collections::HashSet, future::Future, mem};
 use tachys::view::RenderHtml;
 
 #[derive(Clone, Debug, Default)]
@@ -81,7 +79,6 @@ impl RouteListing {
     /// Generates static files for this route listing.
     pub async fn generate_static_files<Fut, WriterFut>(
         mut self,
-        site_base: Arc<str>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
@@ -105,7 +102,6 @@ impl RouteListing {
                 // it; we're only using it to notify them it's done so it doesn't matter in that
                 // case
                 _ = all_initial_tx.send(path.build(
-                    site_base.clone(),
                     render_fn.clone(),
                     writer.clone(),
                     was_404.clone(),
@@ -200,7 +196,6 @@ impl RouteList {
     /// Generates static files for the inner list of route listings.
     pub async fn generate_static_files<Fut, WriterFut>(
         self,
-        site_base: Arc<str>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
@@ -213,7 +208,6 @@ impl RouteList {
     {
         join_all(self.into_inner().into_iter().map(|route| {
             route.generate_static_files(
-                site_base.clone(),
                 render_fn.clone(),
                 writer.clone(),
                 was_404.clone(),

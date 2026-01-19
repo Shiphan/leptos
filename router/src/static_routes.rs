@@ -295,7 +295,6 @@ impl ResolvedStaticPath {
     /// Builds the page that corresponds to this path.
     pub async fn build<Fut, WriterFut>(
         self,
-        site_base: Arc<str>,
         render_fn: impl Fn(&ResolvedStaticPath) -> Fut + Send + Clone + 'static,
         writer: impl Fn(&ResolvedStaticPath, &Owner, String) -> WriterFut
             + Send
@@ -319,8 +318,8 @@ impl ResolvedStaticPath {
             let was_error = was_404.clone();
             async move {
                 // render and write the initial page
-                println!("render {site_base}{self}");
-                let (owner, html) = render_fn(&Self::new(format!("{site_base}{self}"))).await;
+                println!("render {self}");
+                let (owner, html) = render_fn(&self).await;
 
                 // if rendering this page resulted in an error (404, 500, etc.)
                 // then we should not cache it: the `was_error` function can handle notifying

@@ -75,14 +75,7 @@ use server_fn::{error::ServerFnErrorErr, redirect::REDIRECT_HEADER};
 use std::path::Path;
 #[cfg(feature = "default")]
 use std::sync::LazyLock;
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    fmt::Debug,
-    io,
-    pin::Pin,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashSet, fmt::Debug, io, pin::Pin, sync::{Arc,  RwLock}};
 #[cfg(feature = "default")]
 use tower::util::ServiceExt;
 #[cfg(feature = "default")]
@@ -710,6 +703,7 @@ where
             .as_str();
         // 2. Find RouteListing in paths. This should probably be optimized, we probably don't want to
         // search for this every time
+        println!("path: {path}, paths: {:?}", paths);
         let listing: &AxumRouteListing =
             paths.iter().find(|r| r.path() == path).unwrap_or_else(|| {
                 panic!(
@@ -1488,10 +1482,10 @@ impl StaticRouteGenerator {
                     owner.with(|| {
                         additional_context();
                         Box::pin(ScopedFuture::new(routes.generate_static_files(
-                        site_base,
                         move |path: &ResolvedStaticPath| {
+                            println!("HERE: {site_base}{path}");
                             Self::render_route(
-                                path.to_string(),
+                                format!("{site_base}{path}"),
                                 app_fn.clone(),
                                 additional_context.clone(),
                             )
@@ -1503,6 +1497,7 @@ impl StaticRouteGenerator {
                             let path = path.to_owned();
                             let response_options = owner.with(use_context);
                             async move {
+                                println!("{}: {path}", line!());
                                 write_static_route(
                                     &options,
                                     response_options,
@@ -1578,8 +1573,8 @@ async fn write_static_route(
     path: &str,
     html: &str,
 ) -> Result<(), std::io::Error> {
-    if let Some(options) = response_options {
-        STATIC_HEADERS.insert(path.to_string(), options);
+    if let Some(response_options) = response_options {
+        STATIC_HEADERS.insert(format!("{}{path}", options.site_base), response_options);
     }
 
     let path = static_path(options, path);
@@ -1618,16 +1613,19 @@ where
         Box::pin(async move {
             let options = LeptosOptions::from_ref(&state);
             let orig_path = req.uri().path();
-            let path = static_path(&options, orig_path);
+            println!("orig_path = {orig_path}");
+            // FIXME: remove this unwrap
+            let path = orig_path.strip_prefix(options.site_base.as_ref()).unwrap();
+            let path = static_path(&options, path);
             let path = Path::new(&path);
             let exists = tokio::fs::try_exists(path).await.unwrap_or(false);
+            println!("`{path:?}` in fs is {exists}");
 
             let (response_options, html) = if !exists {
                 let path = ResolvedStaticPath::new(orig_path);
 
                 let (owner, html) = path
                     .build(
-                        options.site_base.clone(),
                         move |path: &ResolvedStaticPath| {
                             println!("trying to render {path}...");
                             StaticRouteGenerator::render_route(
@@ -1658,6 +1656,7 @@ where
                     .await;
                 (owner.with(use_context::<ResponseOptions>), html)
             } else {
+                println!("STATIC_HEADERS: {:?}", STATIC_HEADERS.iter().map(|x| x.key().clone()).collect::<Vec<_>>());
                 let headers = STATIC_HEADERS.get(orig_path).map(|v| v.clone());
                 (headers, None)
             };
@@ -1841,6 +1840,7 @@ where
             };
 
             if !excluded.contains(path) {
+                println!("add a route to {path} (line: {})", line!());
                 router = router.route(
                     path, // TODO: should this also been changed?
                     match method {
@@ -1893,6 +1893,7 @@ where
                         );
                     }
                 } else {
+                    println!("add a route to {path} (line: {})", line!());
                     router.route(
                         path, // TODO: should this also been changed?
                         match listing.mode() {
@@ -1975,6 +1976,7 @@ where
         let mut router = self;
         for listing in paths.iter().filter(|p| !p.exclude) {
             for method in listing.methods() {
+                println!("add a route to {} (line: {})", listing.path(), line!());
                 router = router.route(
                     listing.path(),
                     match method {
@@ -2076,9 +2078,11 @@ where
             let additional_context = additional_context.clone();
             let shell = shell.clone();
             async move {
+                println!("file_and_error_handler_with_context: uri = {uri}");
                 let options = LeptosOptions::from_ref(&state);
                 let res = 'res: {
-                    let mut uri_parts = uri.clone().into_parts();
+                    let old_uri = uri.clone();
+                    let mut uri_parts = uri.into_parts();
                     let Some(path_and_query) = uri_parts.path_and_query else {
                         break 'res None;
                     };
@@ -2097,59 +2101,65 @@ where
                     let Ok(uri) = Uri::from_parts(uri_parts) else {
                         break 'res None;
                     };
+
+                    println!("converted `{old_uri}` to {uri}");
+
                     let res =
                         get_static_file(uri, &options.site_root, req.headers());
                     Some(res.await.unwrap())
-                }.unwrap_or(get_static_file(uri, &options.site_root, req.headers()).await.unwrap());
+                };
 
-                if res.status() == StatusCode::OK {
-                    let owner = Owner::new();
-                    owner.with(|| {
-                        additional_context();
-                        let res = res.into_response();
-                        if let Some(response_options) =
-                            use_context::<ResponseOptions>()
-                        {
-                            let mut res = AxumResponse(res);
-                            res.extend_response(&response_options);
-                            res.0
-                        } else {
-                            res
-                        }
-                    })
-                } else {
-                    let mut res = handle_response_inner(
-                        move || {
-                            provide_context(state.clone());
+                match res {
+                    Some(res) if res.status() == StatusCode::OK => {
+                        let owner = Owner::new();
+                        owner.with(|| {
                             additional_context();
-                        },
-                        move || shell(options),
-                        req,
-                        |app, chunks, _supports_ooo| {
-                            Box::pin(async move {
-                                let app = if cfg!(feature = "islands-router") {
-                                    app.to_html_stream_in_order_branching()
-                                } else {
-                                    app.to_html_stream_in_order()
-                                };
-                                let app = app.collect::<String>().await;
-                                let chunks = chunks();
-                                Box::pin(once(async move { app }).chain(chunks))
-                                    as PinnedStream<String>
-                            })
-                        },
-                    )
-                    .await;
-
-                    // set the status to 404
-                    // but if the status was already set (for example, to a 302 redirect) don't
-                    // overwrite it
-                    let status = res.status_mut();
-                    if *status == StatusCode::OK {
-                        *res.status_mut() = StatusCode::NOT_FOUND;
+                            let res = res.into_response();
+                            if let Some(response_options) =
+                                use_context::<ResponseOptions>()
+                            {
+                                let mut res = AxumResponse(res);
+                                res.extend_response(&response_options);
+                                res.0
+                            } else {
+                                res
+                            }
+                        })
                     }
+                    _ => {
+                        let mut res = handle_response_inner(
+                            move || {
+                                provide_context(state.clone());
+                                additional_context();
+                            },
+                            move || shell(options),
+                            req,
+                            |app, chunks, _supports_ooo| {
+                                Box::pin(async move {
+                                    let app = if cfg!(feature = "islands-router") {
+                                        app.to_html_stream_in_order_branching()
+                                    } else {
+                                        app.to_html_stream_in_order()
+                                    };
+                                    let app = app.collect::<String>().await;
+                                    let chunks = chunks();
+                                    Box::pin(once(async move { app }).chain(chunks))
+                                        as PinnedStream<String>
+                                })
+                            },
+                        )
+                        .await;
 
-                    res
+                        // set the status to 404
+                        // but if the status was already set (for example, to a 302 redirect) don't
+                        // overwrite it
+                        let status = res.status_mut();
+                        if *status == StatusCode::OK {
+                            *res.status_mut() = StatusCode::NOT_FOUND;
+                        }
+
+                        res
+                    }
                 }
             }
         })
