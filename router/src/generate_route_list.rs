@@ -7,7 +7,12 @@ use crate::{
 };
 use futures::future::join_all;
 use reactive_graph::owner::Owner;
-use std::{cell::{Cell, RefCell}, collections::HashSet, future::Future, mem};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashSet,
+    future::Future,
+    mem,
+};
 use tachys::view::RenderHtml;
 
 #[derive(Clone, Debug, Default)]
