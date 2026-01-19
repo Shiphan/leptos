@@ -103,7 +103,6 @@ impl RouteListing {
 
             println!("generate_static_files: paths = {paths:?}");
             for path in paths {
-                println!("generate static file at {path}");
                 // Err(_) here would just mean they've dropped the rx and are no longer awaiting
                 // it; we're only using it to notify them it's done so it doesn't matter in that
                 // case

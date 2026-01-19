@@ -318,7 +318,6 @@ impl ResolvedStaticPath {
             let was_error = was_404.clone();
             async move {
                 // render and write the initial page
-                println!("render {self}");
                 let (owner, html) = render_fn(&self).await;
 
                 // if rendering this page resulted in an error (404, 500, etc.)
@@ -330,7 +329,6 @@ impl ResolvedStaticPath {
                     // awaiting the Future
                     _ = tx.send((owner.clone(), Some(html)));
                 } else {
-                    println!("writeing some html to {self}");
                     if let Err(e) = writer(&self, &owner, html).await {
                         #[cfg(feature = "tracing")]
                         tracing::warn!("{e}");
@@ -363,7 +361,6 @@ impl ResolvedStaticPath {
                 while regenerate.next().await.is_some() {
                     let (owner, html) = render_fn(&self).await;
                     if !was_error(&owner) {
-                        println!("writeing some html to {self}");
                         if let Err(e) = writer(&self, &owner, html).await {
                             #[cfg(feature = "tracing")]
                             tracing::warn!("{e}");
