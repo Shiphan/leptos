@@ -709,7 +709,6 @@ where
             .as_str();
         // 2. Find RouteListing in paths. This should probably be optimized, we probably don't want to
         // search for this every time
-        println!("path: {path}, paths: {:?}", paths);
         let listing: &AxumRouteListing =
             paths.iter().find(|r| r.path() == path).unwrap_or_else(|| {
                 panic!(
@@ -1482,7 +1481,6 @@ impl StaticRouteGenerator {
                         additional_context();
                         Box::pin(ScopedFuture::new(routes.generate_static_files(
                         move |path: &ResolvedStaticPath| {
-                            println!("HERE: {site_base}{path}");
                             Self::render_route(
                                 format!("{site_base}{path}"),
                                 app_fn.clone(),
@@ -1496,7 +1494,6 @@ impl StaticRouteGenerator {
                             let path = path.to_owned();
                             let response_options = owner.with(use_context);
                             async move {
-                                println!("StaticRouteGenerator::new: write some html to {path}");
                                 write_static_route(
                                     &options,
                                     response_options,
@@ -1612,7 +1609,6 @@ where
         Box::pin(async move {
             let options = LeptosOptions::from_ref(&state);
             let orig_path = req.uri().path();
-            println!("orig_path = {orig_path}");
             let path = orig_path.strip_prefix(options.site_base.as_ref())
                 .map(|path| static_path(&options, path));
             let exists = if let Some(path) = &path {
@@ -1620,7 +1616,6 @@ where
             } else {
                 false
             };
-            println!("`{path:?}` in fs is {exists}");
 
             let (response_options, html) = if !exists {
                 let path = ResolvedStaticPath::new(orig_path);
@@ -1628,7 +1623,6 @@ where
                 let (owner, html) = path
                     .build(
                         move |path: &ResolvedStaticPath| {
-                            println!("trying to render {path}...");
                             StaticRouteGenerator::render_route(
                                 path.to_string(),
                                 app_fn.clone(),
@@ -1658,7 +1652,6 @@ where
                     .await;
                 (owner.with(use_context::<ResponseOptions>), html)
             } else {
-                println!("STATIC_HEADERS: {:?}", STATIC_HEADERS.iter().map(|x| x.key().clone()).collect::<Vec<_>>());
                 let headers = STATIC_HEADERS.get(orig_path).map(|v| v.clone());
                 (headers, None)
             };
@@ -1839,14 +1832,12 @@ where
 
         // register server functions
         for (path, method) in server_fn::axum::server_fn_paths() {
-            println!("path: {path}, method: {method:?}");
             let cx_with_state = cx_with_state.clone();
             let handler = move |req: Request<Body>| async move {
                 handle_server_fns_with_context(cx_with_state, req).await
             };
 
             if !excluded.contains(path) {
-                println!("add a route to {path} (server function)");
                 router = router.route(
                     path,
                     match method {
@@ -1870,8 +1861,6 @@ where
         for listing in paths.iter().filter(|p| !p.exclude) {
             let path = format!("{}{}", site_base, listing.path());
 
-            println!("path: {path}");
-
             for method in listing.methods() {
                 let cx_with_state = cx_with_state.clone();
                 let cx_with_state_and_method = move || {
@@ -1881,7 +1870,6 @@ where
                 router = if matches!(listing.mode(), SsrMode::Static(_)) {
                     #[cfg(feature = "default")]
                     {
-                        println!("add a route to {path}");
                         router.route(
                             &path,
                             get(handle_static_route(
@@ -1899,7 +1887,6 @@ where
                         );
                     }
                 } else {
-                    println!("add a route to {path} (ssr mode: {:?})", listing.mode());
                     router.route(
                         &path,
                         match listing.mode() {
@@ -1982,7 +1969,6 @@ where
         let mut router = self;
         for listing in paths.iter().filter(|p| !p.exclude) {
             for method in listing.methods() {
-                println!("LeptosRoutes::leptos_routes_with_handler: add a route to {}", listing.path());
                 router = router.route(
                     listing.path(),
                     match method {
@@ -2084,10 +2070,8 @@ where
             let additional_context = additional_context.clone();
             let shell = shell.clone();
             async move {
-                println!("file_and_error_handler_with_context: uri = {uri}");
                 let options = LeptosOptions::from_ref(&state);
                 let res = 'res: {
-                    let old_uri = uri.clone();
                     let mut uri_parts = uri.into_parts();
                     let Some(path_and_query) = uri_parts.path_and_query else {
                         break 'res None;
@@ -2107,8 +2091,6 @@ where
                     let Ok(uri) = Uri::from_parts(uri_parts) else {
                         break 'res None;
                     };
-
-                    println!("converted `{old_uri}` to {uri}");
 
                     let res =
                         get_static_file(uri, &options.site_root, req.headers());
