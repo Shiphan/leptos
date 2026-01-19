@@ -75,7 +75,13 @@ use server_fn::{error::ServerFnErrorErr, redirect::REDIRECT_HEADER};
 use std::path::Path;
 #[cfg(feature = "default")]
 use std::sync::LazyLock;
-use std::{collections::HashSet, fmt::Debug, io, pin::Pin, sync::{Arc,  RwLock}};
+use std::{
+    collections::HashSet,
+    fmt::Debug,
+    io,
+    pin::Pin,
+    sync::{Arc, RwLock},
+};
 #[cfg(feature = "default")]
 use tower::util::ServiceExt;
 #[cfg(feature = "default")]
