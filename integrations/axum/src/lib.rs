@@ -1620,11 +1620,13 @@ where
             let options = LeptosOptions::from_ref(&state);
             let orig_path = req.uri().path();
             println!("orig_path = {orig_path}");
-            // FIXME: remove this unwrap
-            let path = orig_path.strip_prefix(options.site_base.as_ref()).unwrap();
-            let path = static_path(&options, path);
-            let path = Path::new(&path);
-            let exists = tokio::fs::try_exists(path).await.unwrap_or(false);
+            let path = orig_path.strip_prefix(options.site_base.as_ref())
+                .map(|path| static_path(&options, path));
+            let exists = if let Some(path) = &path {
+                tokio::fs::try_exists(path).await.unwrap_or(false)
+            } else {
+                false
+            };
             println!("`{path:?}` in fs is {exists}");
 
             let (response_options, html) = if !exists {
@@ -1674,14 +1676,18 @@ where
             // typos (or malicious requests)
             let mut res = AxumResponse(match html {
                 Some(html) => axum::response::Html(html).into_response(),
-                None => match ServeFile::new(path).oneshot(req).await {
-                    Ok(res) => res.into_response(),
-                    Err(err) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Something went wrong: {err}"),
-                    )
-                        .into_response(),
-                },
+                None => if let Some(path) = path {
+                    match ServeFile::new(path).oneshot(req).await {
+                        Ok(res) => res.into_response(),
+                        Err(err) => (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Something went wrong: {err}"),
+                        )
+                            .into_response(),
+                    }
+                } else {
+                    StatusCode::NOT_FOUND.into_response()
+                }
             });
 
             if let Some(options) = response_options {
