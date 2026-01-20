@@ -52,7 +52,7 @@ impl ServerFnCall {
         let args = syn::parse2(args)?;
         let body = syn::parse2(body)?;
         let mut myself = ServerFnCall {
-            default_path: default_path.into(),
+            default_path: format!("{}{default_path}", option_env!("LEPTOS_SITE_BASE").unwrap_or("")),
             args,
             body,
             server_fn_path: None,

@@ -1848,7 +1848,7 @@ where
             if !excluded.contains(path) {
                 println!("add a route to {path} (line: {})", line!());
                 router = router.route(
-                    path, // TODO: should this also been changed?
+                    path,
                     match method {
                         Method::GET => get(handler),
                         Method::POST => post(handler),
@@ -1868,7 +1868,7 @@ where
 
         // register router paths
         for listing in paths.iter().filter(|p| !p.exclude) {
-            let path = listing.path();
+            let path = format!("{}{}", site_base, listing.path());
 
             println!("path: {path}");
 
@@ -1883,7 +1883,7 @@ where
                     {
                         println!("add a route to {site_base}{path}");
                         router.route(
-                            &format!("{site_base}{path}"),
+                            &path,
                             get(handle_static_route(
                                 cx_with_state_and_method.clone(),
                                 app_fn.clone(),
@@ -1901,7 +1901,7 @@ where
                 } else {
                     println!("add a route to {path} (line: {})", line!());
                     router.route(
-                        path, // TODO: should this also been changed?
+                        &path,
                         match listing.mode() {
                             SsrMode::OutOfOrder => {
                                 let s = render_app_to_stream_with_context(
