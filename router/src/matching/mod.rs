@@ -107,10 +107,7 @@ where
         Option<&str>,
         impl IntoIterator<Item = GeneratedRouteData> + '_,
     ) {
-        (
-            self.base.as_deref(),
-            self.children.generate_routes(),
-        )
+        (self.base.as_deref(), self.children.generate_routes())
     }
 }
 

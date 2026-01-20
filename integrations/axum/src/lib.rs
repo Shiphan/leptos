@@ -1181,13 +1181,12 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list<IV>(
-    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
 ) -> Vec<AxumRouteListing>
 where
     IV: IntoView + 'static,
 {
-    generate_route_list_with_exclusions_and_ssg(site_base, app_fn, None).0
+    generate_route_list_with_exclusions_and_ssg(app_fn, None).0
 }
 
 /// Generates a list of all routes defined in Leptos's Router in your app. We can then use this to automatically
@@ -1198,13 +1197,12 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_ssg<IV>(
-    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
 ) -> (Vec<AxumRouteListing>, StaticRouteGenerator)
 where
     IV: IntoView + 'static,
 {
-    generate_route_list_with_exclusions_and_ssg(site_base, app_fn, None)
+    generate_route_list_with_exclusions_and_ssg(app_fn, None)
 }
 
 /// Generates a list of all routes defined in Leptos's Router in your app. We can then use this to automatically
@@ -1216,14 +1214,13 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_exclusions<IV>(
-    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
     excluded_routes: Option<Vec<String>>,
 ) -> Vec<AxumRouteListing>
 where
     IV: IntoView + 'static,
 {
-    generate_route_list_with_exclusions_and_ssg(site_base, app_fn, excluded_routes).0
+    generate_route_list_with_exclusions_and_ssg(app_fn, excluded_routes).0
 }
 
 /// Generates a list of all routes defined in Leptos's Router in your app. We can then use this to automatically
@@ -1235,7 +1232,6 @@ where
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_exclusions_and_ssg<IV>(
-    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + 'static + Clone + Send,
     excluded_routes: Option<Vec<String>>,
 ) -> (Vec<AxumRouteListing>, StaticRouteGenerator)
@@ -1243,7 +1239,6 @@ where
     IV: IntoView + 'static,
 {
     generate_route_list_with_exclusions_and_ssg_and_context(
-        site_base,
         app_fn,
         excluded_routes,
         || {},
@@ -1336,7 +1331,6 @@ impl AxumRouteListing {
     tracing::instrument(level = "trace", fields(error), skip_all)
 )]
 pub fn generate_route_list_with_exclusions_and_ssg_and_context<IV>(
-    site_base: Arc<str>,
     app_fn: impl Fn() -> IV + Clone + Send + 'static,
     excluded_routes: Option<Vec<String>>,
     additional_context: impl Fn() + Clone + Send + 'static,
@@ -1362,7 +1356,6 @@ where
 
     let generator = StaticRouteGenerator::new(
         &routes,
-        site_base,
         app_fn.clone(),
         additional_context.clone(),
     );
@@ -1469,7 +1462,6 @@ impl StaticRouteGenerator {
     /// Creates a new static route generator from the given list of route definitions.
     pub fn new<IV>(
         routes: &RouteList,
-        site_base: Arc<str>,
         app_fn: impl Fn() -> IV + Clone + Send + 'static,
         additional_context: impl Fn() + Clone + Send + 'static,
     ) -> Self
@@ -1485,6 +1477,7 @@ impl StaticRouteGenerator {
                     let options = options.clone();
                     let app_fn = app_fn.clone();
                     let additional_context = additional_context.clone();
+                    let site_base = options.site_base.clone();
                     owner.with(|| {
                         additional_context();
                         Box::pin(ScopedFuture::new(routes.generate_static_files(
