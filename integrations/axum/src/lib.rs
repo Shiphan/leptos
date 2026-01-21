@@ -1496,7 +1496,7 @@ impl StaticRouteGenerator {
                             let path = path.to_owned();
                             let response_options = owner.with(use_context);
                             async move {
-                                println!("{}: {path}", line!());
+                                println!("StaticRouteGenerator::new: write some html to {path}");
                                 write_static_route(
                                     &options,
                                     response_options,
@@ -1642,6 +1642,7 @@ where
                             let path = path.to_owned();
                             let response_options = owner.with(use_context);
                             async move {
+                                println!("handle_static_route: write some html to {path}");
                                 write_static_route(
                                     &options,
                                     response_options,
@@ -1845,7 +1846,7 @@ where
             };
 
             if !excluded.contains(path) {
-                println!("add a route to {path} (line: {})", line!());
+                println!("add a route to {path} (server function)");
                 router = router.route(
                     path,
                     match method {
@@ -1880,7 +1881,7 @@ where
                 router = if matches!(listing.mode(), SsrMode::Static(_)) {
                     #[cfg(feature = "default")]
                     {
-                        println!("add a route to {site_base}{path}");
+                        println!("add a route to {path}");
                         router.route(
                             &path,
                             get(handle_static_route(
@@ -1898,7 +1899,7 @@ where
                         );
                     }
                 } else {
-                    println!("add a route to {path} (line: {})", line!());
+                    println!("add a route to {path} (ssr mode: {:?})", listing.mode());
                     router.route(
                         &path,
                         match listing.mode() {
@@ -1981,7 +1982,7 @@ where
         let mut router = self;
         for listing in paths.iter().filter(|p| !p.exclude) {
             for method in listing.methods() {
-                println!("add a route to {} (line: {})", listing.path(), line!());
+                println!("LeptosRoutes::leptos_routes_with_handler: add a route to {}", listing.path());
                 router = router.route(
                     listing.path(),
                     match method {

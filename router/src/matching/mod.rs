@@ -17,7 +17,6 @@ pub use vertical::*;
 
 #[derive(Debug)]
 pub struct RouteDefs<Children> {
-    site_base: Option<Cow<'static, str>>,
     base: Option<Cow<'static, str>>,
     children: Children,
 }
@@ -28,7 +27,6 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            site_base: self.site_base.clone(),
             base: self.base.clone(),
             children: self.children.clone(),
         }
@@ -36,24 +34,18 @@ where
 }
 
 impl<Children> RouteDefs<Children> {
-    pub fn new(
-        site_base: Option<impl Into<Cow<'static, str>>>,
-        children: Children,
-    ) -> Self {
+    pub fn new(children: Children) -> Self {
         Self {
-            site_base: site_base.map(Into::into),
             base: None,
             children,
         }
     }
 
     pub fn new_with_base(
-        site_base: Option<impl Into<Cow<'static, str>>>,
         children: Children,
         base: impl Into<Cow<'static, str>>,
     ) -> Self {
         Self {
-            site_base: site_base.map(Into::into),
             base: Some(base.into()),
             children,
         }
@@ -65,18 +57,15 @@ where
     Children: MatchNestedRoutes,
 {
     pub fn match_route(&self, path: &str) -> Option<Children::Match> {
-        let path = match &self.site_base {
+        let path = match option_env!("LEPTOS_SITE_BASE") {
             None => path,
             Some(site_base) => {
-                let (base, path) = if site_base.starts_with('/') {
-                    (
-                        site_base.trim_start_matches('/'),
-                        path.trim_start_matches('/'),
-                    )
+                let (site_base, path) = if site_base.starts_with('/') {
+                    (site_base.trim_start_matches('/'), path.trim_start_matches('/'))
                 } else {
                     (site_base.as_ref(), path)
                 };
-                path.strip_prefix(base)?
+                path.strip_prefix(site_base)?
             }
         };
         let path = match &self.base {
@@ -178,8 +167,6 @@ pub struct GeneratedRouteData {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
     use super::{NestedRoute, ParamSegment, RouteDefs};
     use crate::{
         matching::MatchParams, MatchInterface, PathSegment, StaticSegment,
@@ -189,10 +176,8 @@ mod tests {
 
     #[test]
     pub fn matches_single_root_route() {
-        let routes = RouteDefs::<_>::new(
-            None::<Cow<_>>,
-            NestedRoute::new(StaticSegment("/"), || ()),
-        );
+        let routes =
+            RouteDefs::<_>::new(NestedRoute::new(StaticSegment("/"), || ()));
         let matched = routes.match_route("/");
         assert!(matched.is_some());
         // this case seems like it should match, but implementing it interferes with
@@ -209,7 +194,6 @@ mod tests {
     #[test]
     pub fn matches_nested_route() {
         let routes: RouteDefs<_> = RouteDefs::new(
-            None::<Cow<_>>,
             NestedRoute::new(StaticSegment(""), || "Home").child(
                 NestedRoute::new(
                     (StaticSegment("author"), StaticSegment("contact")),
@@ -242,13 +226,10 @@ mod tests {
 
     #[test]
     pub fn does_not_match_route_unless_full_param_matches() {
-        let routes = RouteDefs::<_>::new(
-            None::<Cow<_>>,
-            (
-                NestedRoute::new(StaticSegment("/property-api"), || ()),
-                NestedRoute::new(StaticSegment("/property"), || ()),
-            ),
-        );
+        let routes = RouteDefs::<_>::new((
+            NestedRoute::new(StaticSegment("/property-api"), || ()),
+            NestedRoute::new(StaticSegment("/property"), || ()),
+        ));
         let matched = routes.match_route("/property").unwrap();
         assert!(matches!(matched, Either::Right(_)));
     }
@@ -256,7 +237,6 @@ mod tests {
     #[test]
     pub fn does_not_match_incomplete_route() {
         let routes: RouteDefs<_> = RouteDefs::new(
-            None::<Cow<_>>,
             NestedRoute::new(StaticSegment(""), || "Home").child(
                 NestedRoute::new(
                     (StaticSegment("author"), StaticSegment("contact")),
@@ -270,22 +250,19 @@ mod tests {
 
     #[test]
     pub fn chooses_between_nested_routes() {
-        let routes: RouteDefs<_> = RouteDefs::new(
-            None::<Cow<_>>,
-            (
-                NestedRoute::new(StaticSegment("/"), || ()).child((
-                    NestedRoute::new(StaticSegment(""), || ()),
-                    NestedRoute::new(StaticSegment("about"), || ()),
-                )),
-                NestedRoute::new(StaticSegment("/blog"), || ()).child((
-                    NestedRoute::new(StaticSegment(""), || ()),
-                    NestedRoute::new(
-                        (StaticSegment("post"), ParamSegment("id")),
-                        || (),
-                    ),
-                )),
-            ),
-        );
+        let routes: RouteDefs<_> = RouteDefs::new((
+            NestedRoute::new(StaticSegment("/"), || ()).child((
+                NestedRoute::new(StaticSegment(""), || ()),
+                NestedRoute::new(StaticSegment("about"), || ()),
+            )),
+            NestedRoute::new(StaticSegment("/blog"), || ()).child((
+                NestedRoute::new(StaticSegment(""), || ()),
+                NestedRoute::new(
+                    (StaticSegment("post"), ParamSegment("id")),
+                    || (),
+                ),
+            )),
+        ));
 
         // generates routes correctly
         let (base, paths) = routes.generate_routes();
@@ -328,7 +305,6 @@ mod tests {
     #[test]
     pub fn arbitrary_nested_routes() {
         let routes: RouteDefs<_> = RouteDefs::new_with_base(
-            None::<Cow<_>>,
             (
                 NestedRoute::new(StaticSegment("/"), || ()).child((
                     NestedRoute::new(StaticSegment("/"), || ()),
@@ -376,18 +352,15 @@ mod tests {
 
     #[test]
     pub fn dont_match_smooshed_static_segments() {
-        let routes = RouteDefs::<_>::new(
-            None::<Cow<_>>,
-            (
-                NestedRoute::new(StaticSegment(""), || ()),
-                NestedRoute::new(StaticSegment("users"), || ()),
-                NestedRoute::new(
-                    (StaticSegment("users"), StaticSegment("id")),
-                    || (),
-                ),
-                NestedRoute::new(WildcardSegment("any"), || ()),
+        let routes = RouteDefs::<_>::new((
+            NestedRoute::new(StaticSegment(""), || ()),
+            NestedRoute::new(StaticSegment("users"), || ()),
+            NestedRoute::new(
+                (StaticSegment("users"), StaticSegment("id")),
+                || (),
             ),
-        );
+            NestedRoute::new(WildcardSegment("any"), || ()),
+        ));
 
         let matched = routes.match_route("/users");
         assert!(matches!(matched, Some(EitherOf4::B(..))));

@@ -96,6 +96,7 @@ impl RouteListing {
             let regenerate = mem::take(&mut self.regenerate);
             let paths = self.into_static_paths().await.unwrap_or_default();
 
+            println!("generate_static_files: paths = {paths:?}");
             for path in paths {
                 println!("generate static file at {path}");
                 // Err(_) here would just mean they've dropped the rx and are no longer awaiting

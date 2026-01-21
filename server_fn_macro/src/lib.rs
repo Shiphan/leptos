@@ -26,6 +26,7 @@ pub struct ServerFnCall {
     default_protocol: Option<Type>,
     default_input_encoding: Option<Type>,
     default_output_encoding: Option<Type>,
+    site_base: Option<&'static str>,
 }
 
 impl ServerFnCall {
@@ -52,7 +53,7 @@ impl ServerFnCall {
         let args = syn::parse2(args)?;
         let body = syn::parse2(body)?;
         let mut myself = ServerFnCall {
-            default_path: format!("{}{default_path}", option_env!("LEPTOS_SITE_BASE").unwrap_or("")),
+            default_path: default_path.into(),
             args,
             body,
             server_fn_path: None,
@@ -60,6 +61,7 @@ impl ServerFnCall {
             default_protocol: None,
             default_input_encoding: None,
             default_output_encoding: None,
+            site_base: option_env!("LEPTOS_SITE_BASE")
         };
 
         // We need to make the server function body send if actix is enabled. To
@@ -492,10 +494,11 @@ impl ServerFnCall {
     /// a hash of the function name and location in the source code.
     pub fn server_fn_url(&self) -> TokenStream2 {
         let default_path = &self.default_path;
-        let prefix =
-            self.args.prefix.clone().unwrap_or_else(|| {
-                LitStr::new(default_path, Span::call_site())
-            });
+        let site_base = self.site_base.unwrap_or_default();
+        let prefix = match &self.args.prefix {
+            Some(prefix) => LitStr::new(&format!("{site_base}{}", prefix.value()), prefix.span()),
+            None => LitStr::new(&format!("{site_base}{default_path}"), Span::call_site()),
+        };
         let server_fn_path = self.server_fn_path();
         let fn_path = self.args.fn_path.clone().map(|fn_path| {
             let fn_path = fn_path.value();
