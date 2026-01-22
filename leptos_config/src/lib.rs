@@ -56,6 +56,11 @@ pub struct LeptosOptions {
     #[builder(setter(into), default=default_site_addr())]
     #[serde(default = "default_site_addr")]
     pub site_addr: SocketAddr,
+    /// TODO: add docs
+    /// default to empty string, should not include trailing /
+    #[builder(setter(into), default=default_site_base())]
+    #[serde(default = "default_site_base")]
+    pub site_base: Arc<str>,
     /// The port the Websocket watcher listens on. Should match the `reload_port` in cargo-leptos(if using).
     /// Defaults to `3001`
     #[builder(default = default_reload_port())]
@@ -144,6 +149,7 @@ impl LeptosOptions {
             env: env_from_str(env_w_default("LEPTOS_ENV", "DEV")?.as_str())?,
             site_addr: env_w_default("LEPTOS_SITE_ADDR", "127.0.0.1:3000")?
                 .parse()?,
+            site_base: env_w_default("LEPTOS_SITE_BASE", option_env!("LEPTOS_SITE_BASE").unwrap_or_default())?.into(),
             reload_port: env_w_default("LEPTOS_RELOAD_PORT", "3001")?
                 .parse()?,
             reload_external_port: match env_wo_default(
@@ -182,6 +188,10 @@ fn default_env() -> Env {
 
 fn default_site_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 3000))
+}
+
+fn default_site_base() -> Arc<str> {
+    "".into()
 }
 
 fn default_reload_port() -> u32 {

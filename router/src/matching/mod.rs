@@ -57,6 +57,17 @@ where
     Children: MatchNestedRoutes,
 {
     pub fn match_route(&self, path: &str) -> Option<Children::Match> {
+        let path = match option_env!("LEPTOS_SITE_BASE") {
+            None => path,
+            Some(site_base) => {
+                let (site_base, path) = if site_base.starts_with('/') {
+                    (site_base.trim_start_matches('/'), path.trim_start_matches('/'))
+                } else {
+                    (site_base.as_ref(), path)
+                };
+                path.strip_prefix(site_base)?
+            }
+        };
         let path = match &self.base {
             None => path,
             Some(base) => {

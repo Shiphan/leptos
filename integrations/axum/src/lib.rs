@@ -35,7 +35,7 @@
 //! directory in the Leptos repository.
 
 #[cfg(feature = "default")]
-use axum::http::Uri;
+use axum::http::{uri::PathAndQuery, Uri};
 use axum::{
     body::{Body, Bytes},
     extract::{FromRef, FromRequestParts, MatchedPath, State},
@@ -1476,12 +1476,13 @@ impl StaticRouteGenerator {
                     let options = options.clone();
                     let app_fn = app_fn.clone();
                     let additional_context = additional_context.clone();
+                    let site_base = options.site_base.clone();
                     owner.with(|| {
                         additional_context();
                         Box::pin(ScopedFuture::new(routes.generate_static_files(
                         move |path: &ResolvedStaticPath| {
                             Self::render_route(
-                                path.to_string(),
+                                format!("{site_base}{path}"),
                                 app_fn.clone(),
                                 additional_context.clone(),
                             )
@@ -1568,8 +1569,8 @@ async fn write_static_route(
     path: &str,
     html: &str,
 ) -> Result<(), std::io::Error> {
-    if let Some(options) = response_options {
-        STATIC_HEADERS.insert(path.to_string(), options);
+    if let Some(response_options) = response_options {
+        STATIC_HEADERS.insert(format!("{}{path}", options.site_base), response_options);
     }
 
     let path = static_path(options, path);
@@ -1608,9 +1609,13 @@ where
         Box::pin(async move {
             let options = LeptosOptions::from_ref(&state);
             let orig_path = req.uri().path();
-            let path = static_path(&options, orig_path);
-            let path = Path::new(&path);
-            let exists = tokio::fs::try_exists(path).await.unwrap_or(false);
+            let path = orig_path.strip_prefix(options.site_base.as_ref())
+                .map(|path| static_path(&options, path));
+            let exists = if let Some(path) = &path {
+                tokio::fs::try_exists(path).await.unwrap_or(false)
+            } else {
+                false
+            };
 
             let (response_options, html) = if !exists {
                 let path = ResolvedStaticPath::new(orig_path);
@@ -1631,6 +1636,7 @@ where
                             let path = path.to_owned();
                             let response_options = owner.with(use_context);
                             async move {
+                                println!("handle_static_route: write some html to {path}");
                                 write_static_route(
                                     &options,
                                     response_options,
@@ -1657,14 +1663,18 @@ where
             // typos (or malicious requests)
             let mut res = AxumResponse(match html {
                 Some(html) => axum::response::Html(html).into_response(),
-                None => match ServeFile::new(path).oneshot(req).await {
-                    Ok(res) => res.into_response(),
-                    Err(err) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Something went wrong: {err}"),
-                    )
-                        .into_response(),
-                },
+                None => if let Some(path) = path {
+                    match ServeFile::new(path).oneshot(req).await {
+                        Ok(res) => res.into_response(),
+                        Err(err) => (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Something went wrong: {err}"),
+                        )
+                            .into_response(),
+                    }
+                } else {
+                    StatusCode::NOT_FOUND.into_response()
+                }
             });
 
             if let Some(options) = response_options {
@@ -1806,6 +1816,7 @@ where
         // S represents the router's finished state allowing us to provide
         // it to the user's server functions.
         let state = state.clone();
+        let site_base = LeptosOptions::from_ref(&state).site_base;
         let cx_with_state = move || {
             provide_context::<S>(state.clone());
             additional_context();
@@ -1848,7 +1859,7 @@ where
 
         // register router paths
         for listing in paths.iter().filter(|p| !p.exclude) {
-            let path = listing.path();
+            let path = format!("{}{}", site_base, listing.path());
 
             for method in listing.methods() {
                 let cx_with_state = cx_with_state.clone();
@@ -1860,7 +1871,7 @@ where
                     #[cfg(feature = "default")]
                     {
                         router.route(
-                            path,
+                            &path,
                             get(handle_static_route(
                                 cx_with_state_and_method.clone(),
                                 app_fn.clone(),
@@ -1877,7 +1888,7 @@ where
                     }
                 } else {
                     router.route(
-                        path,
+                        &path,
                         match listing.mode() {
                             SsrMode::OutOfOrder => {
                                 let s = render_app_to_stream_with_context(
@@ -2060,58 +2071,83 @@ where
             let shell = shell.clone();
             async move {
                 let options = LeptosOptions::from_ref(&state);
-                let res =
-                    get_static_file(uri, &options.site_root, req.headers());
-                let res = res.await.unwrap();
+                let res = 'res: {
+                    let mut uri_parts = uri.into_parts();
+                    let Some(path_and_query) = uri_parts.path_and_query else {
+                        break 'res None;
+                    };
+                    let Some(path_and_query) = path_and_query
+                        .as_str()
+                        .strip_prefix(options.site_base.as_ref())
+                    else {
+                        break 'res None;
+                    };
+                    let Ok(path_and_query) =
+                        PathAndQuery::try_from(path_and_query)
+                    else {
+                        break 'res None;
+                    };
+                    uri_parts.path_and_query = Some(path_and_query);
+                    let Ok(uri) = Uri::from_parts(uri_parts) else {
+                        break 'res None;
+                    };
 
-                if res.status() == StatusCode::OK {
-                    let owner = Owner::new();
-                    owner.with(|| {
-                        additional_context();
-                        let res = res.into_response();
-                        if let Some(response_options) =
-                            use_context::<ResponseOptions>()
-                        {
-                            let mut res = AxumResponse(res);
-                            res.extend_response(&response_options);
-                            res.0
-                        } else {
-                            res
-                        }
-                    })
-                } else {
-                    let mut res = handle_response_inner(
-                        move || {
-                            provide_context(state.clone());
+                    let res =
+                        get_static_file(uri, &options.site_root, req.headers());
+                    Some(res.await.unwrap())
+                };
+
+                match res {
+                    Some(res) if res.status() == StatusCode::OK => {
+                        let owner = Owner::new();
+                        owner.with(|| {
                             additional_context();
-                        },
-                        move || shell(options),
-                        req,
-                        |app, chunks, _supports_ooo| {
-                            Box::pin(async move {
-                                let app = if cfg!(feature = "islands-router") {
-                                    app.to_html_stream_in_order_branching()
-                                } else {
-                                    app.to_html_stream_in_order()
-                                };
-                                let app = app.collect::<String>().await;
-                                let chunks = chunks();
-                                Box::pin(once(async move { app }).chain(chunks))
-                                    as PinnedStream<String>
-                            })
-                        },
-                    )
-                    .await;
-
-                    // set the status to 404
-                    // but if the status was already set (for example, to a 302 redirect) don't
-                    // overwrite it
-                    let status = res.status_mut();
-                    if *status == StatusCode::OK {
-                        *res.status_mut() = StatusCode::NOT_FOUND;
+                            let res = res.into_response();
+                            if let Some(response_options) =
+                                use_context::<ResponseOptions>()
+                            {
+                                let mut res = AxumResponse(res);
+                                res.extend_response(&response_options);
+                                res.0
+                            } else {
+                                res
+                            }
+                        })
                     }
+                    _ => {
+                        let mut res = handle_response_inner(
+                            move || {
+                                provide_context(state.clone());
+                                additional_context();
+                            },
+                            move || shell(options),
+                            req,
+                            |app, chunks, _supports_ooo| {
+                                Box::pin(async move {
+                                    let app = if cfg!(feature = "islands-router") {
+                                        app.to_html_stream_in_order_branching()
+                                    } else {
+                                        app.to_html_stream_in_order()
+                                    };
+                                    let app = app.collect::<String>().await;
+                                    let chunks = chunks();
+                                    Box::pin(once(async move { app }).chain(chunks))
+                                        as PinnedStream<String>
+                                })
+                            },
+                        )
+                        .await;
 
-                    res
+                        // set the status to 404
+                        // but if the status was already set (for example, to a 302 redirect) don't
+                        // overwrite it
+                        let status = res.status_mut();
+                        if *status == StatusCode::OK {
+                            *res.status_mut() = StatusCode::NOT_FOUND;
+                        }
+
+                        res
+                    }
                 }
             }
         })
