@@ -149,7 +149,7 @@ impl LeptosOptions {
             env: env_from_str(env_w_default("LEPTOS_ENV", "DEV")?.as_str())?,
             site_addr: env_w_default("LEPTOS_SITE_ADDR", "127.0.0.1:3000")?
                 .parse()?,
-            site_base: env_w_default("LEPTOS_SITE_BASE", "")?.into(),
+            site_base: env_w_default("LEPTOS_SITE_BASE", option_env!("LEPTOS_SITE_BASE").unwrap_or_default())?.into(),
             reload_port: env_w_default("LEPTOS_RELOAD_PORT", "3001")?
                 .parse()?,
             reload_external_port: match env_wo_default(
